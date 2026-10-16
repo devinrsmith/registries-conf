@@ -34,6 +34,9 @@ type pullSource struct {
 	Location  string `json:"location"`
 	Insecure  bool   `json:"insecure"`
 	Mirror    bool   `json:"mirror"`
+	// NamespaceProxy, when set, is sent as the "ns" query parameter on every
+	// request to this endpoint (OCI distribution-spec registry proxying).
+	NamespaceProxy string `json:"namespaceProxy,omitempty"`
 }
 
 func runResolve(args []string, out io.Writer) error {
@@ -84,11 +87,14 @@ func runResolve(args []string, out io.Writer) error {
 					if s.Mirror {
 						kind = "mirror"
 					}
-					insecure := ""
+					notes := ""
 					if s.Insecure {
-						insecure = " (insecure)"
+						notes = " (insecure)"
 					}
-					fmt.Fprintf(out, "    %-8s%s%s\n", kind, s.Reference, insecure)
+					if s.NamespaceProxy != "" {
+						notes += fmt.Sprintf(" (namespace-proxy=%s)", s.NamespaceProxy)
+					}
+					fmt.Fprintf(out, "    %-8s%s%s\n", kind, s.Reference, notes)
 				}
 			}
 		}
@@ -140,10 +146,11 @@ func pullSources(sys *types.SystemContext, ref reference.Named) (candidate, erro
 	// PullSourcesFromReference always appends the primary endpoint last.
 	for i, s := range sources {
 		c.PullSources = append(c.PullSources, pullSource{
-			Reference: s.Reference.String(),
-			Location:  s.Endpoint.Location,
-			Insecure:  s.Endpoint.Insecure,
-			Mirror:    i < len(sources)-1,
+			Reference:      s.Reference.String(),
+			Location:       s.Endpoint.Location,
+			Insecure:       s.Endpoint.Insecure,
+			Mirror:         i < len(sources)-1,
+			NamespaceProxy: s.Endpoint.NamespaceProxy,
 		})
 	}
 	return c, nil

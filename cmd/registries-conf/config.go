@@ -27,6 +27,7 @@ type registry struct {
 	Insecure           bool       `json:"insecure"`
 	Blocked            bool       `json:"blocked"`
 	MirrorByDigestOnly bool       `json:"mirrorByDigestOnly"`
+	NamespaceProxy     string     `json:"namespaceProxy,omitempty"`
 	Mirrors            []endpoint `json:"mirrors"`
 }
 
@@ -34,6 +35,7 @@ type endpoint struct {
 	Location       string `json:"location"`
 	Insecure       bool   `json:"insecure"`
 	PullFromMirror string `json:"pullFromMirror,omitempty"`
+	NamespaceProxy string `json:"namespaceProxy,omitempty"`
 }
 
 func loadConfig(sys *types.SystemContext) (effectiveConfig, error) {
@@ -69,10 +71,11 @@ func loadConfig(sys *types.SystemContext) (effectiveConfig, error) {
 			Insecure:           r.Insecure,
 			Blocked:            r.Blocked,
 			MirrorByDigestOnly: r.MirrorByDigestOnly,
+			NamespaceProxy:     r.NamespaceProxy,
 			Mirrors:            []endpoint{},
 		}
 		for _, m := range r.Mirrors {
-			out.Mirrors = append(out.Mirrors, endpoint{Location: m.Location, Insecure: m.Insecure, PullFromMirror: m.PullFromMirror})
+			out.Mirrors = append(out.Mirrors, endpoint{Location: m.Location, Insecure: m.Insecure, PullFromMirror: m.PullFromMirror, NamespaceProxy: m.NamespaceProxy})
 		}
 		cfg.Registries = append(cfg.Registries, out)
 	}
@@ -119,6 +122,9 @@ func runConfig(args []string, out io.Writer) error {
 		if r.Blocked {
 			fmt.Fprint(out, " blocked")
 		}
+		if r.NamespaceProxy != "" {
+			fmt.Fprintf(out, " namespace-proxy=%s", r.NamespaceProxy)
+		}
 		if r.MirrorByDigestOnly {
 			fmt.Fprint(out, " mirror-by-digest-only")
 		}
@@ -130,6 +136,9 @@ func runConfig(args []string, out io.Writer) error {
 			}
 			if m.PullFromMirror != "" {
 				fmt.Fprintf(out, " pull-from-mirror=%s", m.PullFromMirror)
+			}
+			if m.NamespaceProxy != "" {
+				fmt.Fprintf(out, " namespace-proxy=%s", m.NamespaceProxy)
 			}
 			fmt.Fprintln(out)
 		}

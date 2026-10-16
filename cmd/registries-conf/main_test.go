@@ -204,3 +204,63 @@ func TestParseQuotedList(t *testing.T) {
 		}
 	}
 }
+
+func TestNamespaceProxy(t *testing.T) {
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "registries.conf")
+	writeFile(t, conf, `
+[[registry]]
+prefix = "registry.k8s.io"
+location = "registry.k8s.io"
+[[registry.mirror]]
+location = "proxy.internal"
+namespace-proxy = "registry.k8s.io"
+
+[[registry]]
+prefix = "quay.io"
+location = "proxy.internal"
+namespace-proxy = "quay.io"
+`)
+	flags := []string{
+		"--registries-conf", conf,
+		"--registries-conf-dir", filepath.Join(dir, "missing"),
+		"--short-name-aliases", filepath.Join(dir, "short-name-aliases.conf"),
+	}
+
+	var cfg effectiveConfig
+	if err := json.Unmarshal([]byte(runCmd(t, append([]string{"config", "--format", "json"}, flags...)...)), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	// The library orders [[registry]] tables itself, so look them up by prefix.
+	byPrefix := map[string]registry{}
+	for _, r := range cfg.Registries {
+		byPrefix[r.Prefix] = r
+	}
+	if m := byPrefix["registry.k8s.io"].Mirrors; len(m) != 1 || m[0].NamespaceProxy != "registry.k8s.io" {
+		t.Errorf("config registry.k8s.io mirrors = %+v", m)
+	}
+	if got := byPrefix["quay.io"].NamespaceProxy; got != "quay.io" {
+		t.Errorf("config quay.io namespaceProxy = %q", got)
+	}
+
+	var res []resolution
+	args := append([]string{"resolve", "--format", "json"}, flags...)
+	if err := json.Unmarshal([]byte(runCmd(t, append(args, "registry.k8s.io/pause", "quay.io/a/b")...)), &res); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range res {
+		for _, s := range r.Candidates[0].PullSources {
+			got = append(got, s.Location+"="+s.NamespaceProxy)
+		}
+	}
+	// The k8s primary has no proxy; the quay.io primary does.
+	if want := []string{"proxy.internal=registry.k8s.io", "registry.k8s.io=", "proxy.internal=quay.io"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("resolve pull sources = %q, want %q", got, want)
+	}
+
+	text := runCmd(t, append([]string{"resolve"}, append(flags, "registry.k8s.io/pause")...)...)
+	if !strings.Contains(text, "proxy.internal/pause:latest (namespace-proxy=registry.k8s.io)") {
+		t.Errorf("text output lacks namespace-proxy:\n%s", text)
+	}
+}

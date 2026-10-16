@@ -72,7 +72,7 @@ the same as `short-name-mode = "disabled"`. The configured mode is shown by
 ## Nix
 
 ```sh
-nix run github:devinsmith/registries-conf -- resolve nginx
+nix run github:devinrsmith/registries-conf -- resolve nginx
 ```
 
 The flake exports `packages.<system>.default`, `overlays.default` (adds

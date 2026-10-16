@@ -1,4 +1,4 @@
-module github.com/devinsmith/registries-conf
+module github.com/devinrsmith/registries-conf
 
 go 1.25.7
 
