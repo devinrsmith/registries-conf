@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to a PR supersedes its running checks; runs on main always finish.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # What Nix users get: builds the package (which runs the Go tests in the
+  # sandbox and validates vendorHash) plus the flake's example and version
+  # checks. This is the authoritative check.
+  nix:
+    name: nix flake check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # One runner per system the flake declares: x86_64-linux, aarch64-linux,
+        # aarch64-darwin. Pinned image versions rather than -latest, so an image
+        # upgrade is a visible change here instead of happening underneath us.
+        os: [ubuntu-26.04, ubuntu-26.04-arm, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - run: nix flake check -L
+      - run: nix run . -- version
+
+  # What `go install` users get, which the Nix job doesn't cover: the minimum
+  # Go version in go.mod and the current stable release (Nix uses whichever Go
+  # nixpkgs ships). Also runs checks the Nix build skips.
+  go:
+    name: go (${{ matrix.go }})
+    strategy:
+      fail-fast: false
+      matrix:
+        go: [go.mod minimum, stable]
+    runs-on: ubuntu-26.04
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go == 'stable' && 'stable' || '' }}
+          go-version-file: ${{ matrix.go == 'stable' && '' || 'go.mod' }}
+      - run: go version
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Run gofmt -w on:"; echo "$unformatted"; exit 1
+          fi
+      - name: go mod tidy
+        run: go mod tidy -diff
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build -trimpath -ldflags="-s -w" ./cmd/registries-conf

@@ -5,7 +5,10 @@
 
   outputs = { self, nixpkgs }:
     let
-      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      # No x86_64-darwin: nixpkgs 26.11 (and so nixos-unstable) dropped it, and
+      # its packages fail to evaluate. Intel Macs can use the overlay with
+      # nixpkgs 26.05, or go install.
+      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       pkgsFor = system: nixpkgs.legacyPackages.${system};
       # Reported by `registries-conf version`; dirtyRev ends in "-dirty".
       rev = self.rev or self.dirtyRev or null;

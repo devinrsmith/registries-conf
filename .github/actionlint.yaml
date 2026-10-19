@@ -1,0 +1,8 @@
+# actionlint's built-in list of GitHub-hosted runner labels (as of v1.7.12)
+# predates Ubuntu 26.04. These are GitHub-hosted, not self-hosted; listing them
+# here is actionlint's way of accepting extra labels. Drop entries once
+# actionlint knows them.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04
+    - ubuntu-26.04-arm

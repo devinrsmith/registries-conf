@@ -41,20 +41,60 @@ The binary is static, so cross-compiling with plain Go works directly:
 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" ./cmd/registries-conf
 ```
 
-The flake defines packages for x86_64/aarch64 Linux and Darwin. Building a
-platform other than your own with `nix build .#packages.<system>.default` needs
-a builder for that platform; the flake does not set up Nix cross-compilation.
+The flake defines packages for x86_64 and aarch64 Linux and for aarch64 macOS.
+Building a platform other than your own with
+`nix build .#packages.<system>.default` needs a builder for that platform; the
+flake does not set up Nix cross-compilation.
+
+Intel macOS (x86_64-darwin) is not in the flake: nixpkgs dropped it in 26.11,
+so with the flake's `nixos-unstable` input its packages fail to evaluate. On an
+Intel Mac, either use the overlay with nixpkgs 26.05 (the overlay builds with
+the caller's nixpkgs), or build with plain Go: `go install`, or cross-compile
+from another machine with `GOOS=darwin GOARCH=amd64` as above.
 
 ## Testing
 
 ```sh
 go test ./...       # unit tests, including the parity test against upstream
-nix flake check     # the above in the Nix sandbox, plus the example-config check
+nix flake check     # the above in the Nix sandbox, plus the example-config and version checks
 ```
 
 Tests use their own `short-name-aliases.conf` in a temporary directory (see
 `TestMain`). That keeps a developer's real recorded aliases out of the results,
 and keeps the tests working in the Nix sandbox, where `$HOME` is not writable.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`,
+with two jobs:
+
+| Job | Runs on | What it covers |
+| --- | --- | --- |
+| `nix` | x86_64 and aarch64 Linux, aarch64 macOS: every system the flake declares | `nix flake check`, then `nix run . -- version`. This is what Nix users get, including a correct `vendorHash`. |
+| `go` | the minimum Go in `go.mod`, and the current stable Go | `gofmt`, `go mod tidy -diff`, `go vet`, `go test`, `go build`. This is what `go install` users get, on Go versions the Nix build doesn't use. |
+
+To reproduce the `go` job locally with a specific Go, let the toolchain download
+it:
+
+```sh
+nix develop -c env GOTOOLCHAIN=go1.26.0 go test ./...
+```
+
+The `go.mod` minimum is Go 1.26.0: the oldest supported Go release, and the
+one nixpkgs' `buildGoModule` uses by default. The minimum job installs exactly
+that version, so it catches code that needs a newer Go. Raise the minimum
+when nixpkgs' default Go moves on, or when a dependency requires it (`go get`
+raises it automatically in that case). The job reads `go.mod`, so it follows
+without a workflow change.
+
+The actions are pinned to full commit SHAs, with the version in a comment.
+To update one, look up the new tag's commit (`git ls-remote
+https://github.com/actions/checkout refs/tags/v7.0.1`) and replace both.
+
+Runner images are pinned too (`ubuntu-26.04`, `ubuntu-26.04-arm`, `macos-26`)
+rather than `-latest`, so an OS upgrade happens here, as a reviewed change.
+Check the workflow with `nix run nixpkgs#actionlint`. Its built-in label list
+predates Ubuntu 26.04, so `.github/actionlint.yaml` declares those labels.
 
 ## Updating Go dependencies
 
@@ -201,6 +241,6 @@ changes.
 ## Automation
 
 Renovate and Dependabot can open PRs that bump `go.mod`, but neither updates
-`vendorHash`, so their PRs fail `nix build` until the hash is fixed. A scheduled
+`vendorHash`, so their PRs fail the `nix` CI job until the hash is fixed. A scheduled
 CI job that runs the four update steps above (with `nix-update` for the hash)
 and opens a PR avoids that.
