@@ -24,7 +24,7 @@ nix develop
 
 This gives you Go, `gopls`, `govulncheck` and `nix-update`. It also sets
 `CGO_ENABLED=0`, so local builds match the Nix package. Without Nix, use Go
-1.25.7 or newer and export `CGO_ENABLED=0` yourself; otherwise Go looks for a C
+1.26 or newer and export `CGO_ENABLED=0` yourself; otherwise Go looks for a C
 compiler.
 
 ## Building

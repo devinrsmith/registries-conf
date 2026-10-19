@@ -1,6 +1,6 @@
 module github.com/devinrsmith/registries-conf
 
-go 1.25.7
+go 1.26.0
 
 require go.podman.io/image/v5 v5.41.2
 
