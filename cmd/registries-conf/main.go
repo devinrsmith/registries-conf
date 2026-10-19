@@ -1,6 +1,6 @@
 // Command registries-conf reads containers-registries.conf(5) the same way
 // Podman, Buildah, Skopeo and CRI-O do, by delegating to the shared
-// go.podman.io/image/v5/pkg/sysregistriesv2 and pkg/shortnames packages.
+// go.podman.io/image/v5/pkg/sysregistriesv2 package.
 package main
 
 import (
@@ -27,6 +27,7 @@ Commands:
                      location) for each image, resolving short names first.
   config             Show the effective, merged configuration.
   check              Load the configuration and exit non-zero if it is invalid.
+  version            Show the version of this tool and of containers/image.
 
 Run 'registries-conf <command> -h' for the flags of a command.
 `
@@ -39,8 +40,8 @@ const (
 	formatPlain = "plain"
 )
 
-// commonFlags are accepted by every subcommand and map onto the
-// types.SystemContext fields that containers/image uses to locate config.
+// commonFlags holds the flags subcommands share. The location flags map onto
+// the types.SystemContext fields that containers/image uses to locate config.
 type commonFlags struct {
 	conf    string
 	confDir string
@@ -50,11 +51,18 @@ type commonFlags struct {
 	formats []string
 }
 
+// register adds the configuration-location flags and the format flags.
 func (c *commonFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&c.conf, "registries-conf", "", "path to registries.conf (default: same lookup as podman)")
 	fs.StringVar(&c.confDir, "registries-conf-dir", "", "path to the registries.conf.d drop-in directory")
 	fs.StringVar(&c.root, "root", "", "prefix for the implicit absolute paths (e.g. /etc/containers), for inspecting another root filesystem")
 	fs.StringVar(&c.aliases, "short-name-aliases", "", "path to the machine-generated short-name-aliases.conf that podman records choices in (default: $XDG_CACHE_HOME/containers/short-name-aliases.conf, or /var/cache/containers/short-name-aliases.conf as root)")
+	c.registerFormat(fs)
+}
+
+// registerFormat adds --format and --json, the only flags shared by every
+// command.
+func (c *commonFlags) registerFormat(fs *flag.FlagSet) {
 	fs.StringVar(&c.format, "format", formatText, "output format: "+strings.Join(c.formats, ", "))
 	fs.BoolFunc("json", "shorthand for -format json", func(string) error {
 		c.format = formatJSON
@@ -104,6 +112,11 @@ func run(args []string, out io.Writer) error {
 		return runConfig(args, out)
 	case "check":
 		return runCheck(args, out)
+	case "version":
+		return runVersion(args, out)
+	case "-version", "--version":
+		writeVersionText(out, currentVersion())
+		return nil
 	case "-h", "-help", "--help", "help":
 		fmt.Fprint(out, usage)
 		return nil
@@ -114,14 +127,25 @@ func run(args []string, out io.Writer) error {
 }
 
 func newFlagSet(name, synopsis string, formats ...string) (*flag.FlagSet, *commonFlags) {
+	fs, c := newBareFlagSet(name, synopsis, formats)
+	c.register(fs)
+	return fs, c
+}
+
+// newFormatFlagSet is newFlagSet for commands that don't read configuration.
+func newFormatFlagSet(name, synopsis string, formats ...string) (*flag.FlagSet, *commonFlags) {
+	fs, c := newBareFlagSet(name, synopsis, formats)
+	c.registerFormat(fs)
+	return fs, c
+}
+
+func newBareFlagSet(name, synopsis string, formats []string) (*flag.FlagSet, *commonFlags) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: registries-conf %s\n\nFlags:\n", synopsis)
 		fs.PrintDefaults()
 	}
-	c := &commonFlags{formats: formats}
-	c.register(fs)
-	return fs, c
+	return fs, &commonFlags{formats: formats}
 }
 
 func writeJSON(out io.Writer, v any) error {

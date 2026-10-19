@@ -7,14 +7,16 @@
     let
       forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       pkgsFor = system: nixpkgs.legacyPackages.${system};
+      # Reported by `registries-conf version`; dirtyRev ends in "-dirty".
+      rev = self.rev or self.dirtyRev or null;
     in
     {
       overlays.default = final: prev: {
-        registries-conf = final.callPackage ./package.nix { };
+        registries-conf = final.callPackage ./package.nix { inherit rev; };
       };
 
       packages = forAllSystems (system: rec {
-        registries-conf = (pkgsFor system).callPackage ./package.nix { };
+        registries-conf = (pkgsFor system).callPackage ./package.nix { inherit rev; };
         default = registries-conf;
       });
 
@@ -36,6 +38,15 @@
         in
         {
           package = rc;
+          # The link-time version matches package.nix, and the containers/image
+          # version is read from the build info.
+          version = pkgs.runCommand "registries-conf-version" { nativeBuildInputs = [ rc pkgs.jq ]; } ''
+            registries-conf version --json | tee version.json
+            jq -e '.version == "${rc.version}"' version.json
+            jq -e '.dependencies["go.podman.io/image/v5"] | startswith("v5.")' version.json
+            [ "$(registries-conf --version | head -1)" = "registries-conf ${rc.version}" ]
+            touch $out
+          '';
           example = pkgs.runCommand "registries-conf-example" { nativeBuildInputs = [ rc ]; } ''
             export HOME=$TMPDIR
             conf=${./cmd/registries-conf/testdata}

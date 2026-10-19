@@ -41,6 +41,7 @@ registry-1.docker.io/library/nginx:latest
 $ registries-conf config --format json   # effective merged config
 $ registries-conf check --json           # {"ok": true, "sources": [...]}
 $ registries-conf check              # exit 1 if the config is invalid
+$ registries-conf version            # this tool, Go, and containers/image versions
 ```
 
 Every command accepts:

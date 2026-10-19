@@ -11,6 +11,7 @@ how to use it, see the [README](README.md).
 | `cmd/registries-conf/resolve.go` | `resolve`: candidates and their ordered pull sources |
 | `cmd/registries-conf/shortname.go` | Short-name expansion, ported from `pkg/shortnames` (see [below](#why-short-name-expansion-is-ported)) |
 | `cmd/registries-conf/config.go` | `config` and `check` |
+| `cmd/registries-conf/version.go` | `version` / `--version`, from link-time values and Go build info |
 | `cmd/registries-conf/testdata/` | Example `registries.conf` and drop-in used by the tests and `nix flake check` |
 | `package.nix` | The `buildGoModule` derivation, including `vendorHash` |
 | `flake.nix`, `flake.lock` | Package, overlay, app, dev shell and checks; pins nixpkgs, and therefore the Go toolchain |
@@ -153,6 +154,29 @@ method and adds about 1.6 MiB. After a bump:
 nix build && ls -l result/bin/registries-conf
 go list -deps ./cmd/registries-conf | grep -E 'text/template|promptui'   # expect no output
 ```
+
+## Versions and releasing
+
+`registries-conf version` (or `--version`) reports the tool's version and git
+revision, the Go version, and the versions of `go.podman.io/image/v5` and
+`go.podman.io/storage` that were compiled in. `--json` gives the same as JSON.
+The dependency versions always come from Go's build info. The tool's own
+version comes from different places depending on how it was built:
+
+| Build | Version | Revision |
+| --- | --- | --- |
+| `nix build` / `nix run` | `version` in `package.nix`, passed with `-X main.version` | the flake's `self.rev`, or `self.dirtyRev` with uncommitted changes (shown as "modified") |
+| `go install …@vX.Y.Z` | the git tag | none: Go records no VCS data for `go install` from the module proxy |
+| `go build` in a checkout | a pseudo-version, e.g. `v0.0.0-20261019165301-5899c6fd28ee+dirty` | `vcs.revision` and `vcs.modified` |
+
+Nix builds need the `-X` flags because the sandbox has no `.git` and Go sees the
+module as `(devel)`. The `version` flake check makes sure the reported version
+matches `package.nix`.
+
+To release, keep the two sources in step:
+
+1. Set `version` in `package.nix` (e.g. `0.2.0`) and commit.
+2. Tag that commit `v0.2.0` and push the tag.
 
 ## Design notes
 

@@ -1,6 +1,6 @@
-{ lib, buildGoModule }:
+{ lib, buildGoModule, rev ? null }:
 
-buildGoModule {
+buildGoModule (finalAttrs: {
   pname = "registries-conf";
   version = "0.1.0";
 
@@ -16,11 +16,19 @@ buildGoModule {
   # containers/image pulls in cgo-optional storage code we never touch;
   # a static, cgo-free binary is simpler to drop into images and scripts.
   env.CGO_ENABLED = 0;
-  ldflags = [ "-s" "-w" ];
+
+  # Nix builds have no module version or VCS data in their Go build info, so
+  # pass them in for `registries-conf version`. `rev` is the git commit
+  # (the flake passes self.rev or self.dirtyRev).
+  ldflags = [
+    "-s"
+    "-w"
+    "-X main.version=${finalAttrs.version}"
+  ] ++ lib.optional (rev != null) "-X main.revision=${rev}";
 
   meta = {
     description = "Read containers-registries.conf(5) the way Podman, Buildah, Skopeo and CRI-O do";
     license = lib.licenses.asl20;
     mainProgram = "registries-conf";
   };
-}
+})
