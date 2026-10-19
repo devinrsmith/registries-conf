@@ -15,6 +15,8 @@ how to use it, see the [README](README.md).
 | `cmd/registries-conf/testdata/` | Example `registries.conf` and drop-in used by the tests and `nix flake check` |
 | `package.nix` | The `buildGoModule` derivation, including `vendorHash` |
 | `flake.nix`, `flake.lock` | Package, overlay, app, dev shell and checks; pins nixpkgs, and therefore the Go toolchain |
+| `scripts/release-build.sh` | Builds the release binaries and `SHA256SUMS`; used by the release workflow and for reproducing a release |
+| `.github/workflows/` | `ci.yml` (pull requests, `main`, and called by releases) and `release.yml` |
 
 ## Development environment
 
@@ -208,15 +210,71 @@ version comes from different places depending on how it was built:
 | `nix build` / `nix run` | `version` in `package.nix`, passed with `-X main.version` | the flake's `self.rev`, or `self.dirtyRev` with uncommitted changes (shown as "modified") |
 | `go install …@vX.Y.Z` | the git tag | none: Go records no VCS data for `go install` from the module proxy |
 | `go build` in a checkout | a pseudo-version, e.g. `v0.0.0-20261019165301-5899c6fd28ee+dirty` | `vcs.revision` and `vcs.modified` |
+| release binaries | `version` in `package.nix`, passed to `scripts/release-build.sh` by the release workflow | the release commit |
 
 Nix builds need the `-X` flags because the sandbox has no `.git` and Go sees the
 module as `(devel)`. The `version` flake check makes sure the reported version
 matches `package.nix`.
 
-To release, keep the two sources in step:
+### Releasing
 
-1. Set `version` in `package.nix` (e.g. `0.2.0`) and commit.
-2. Tag that commit `v0.2.0` and push the tag.
+A release is a GitHub release with binaries for linux/amd64, linux/arm64,
+darwin/amd64 and darwin/arm64 (fully static on Linux), a `SHA256SUMS` file, and
+a build provenance attestation. Its git tag `vX.Y.Z` also makes the version
+available to `go install`.
+
+**A version can only be released once.** As soon as anyone fetches `@vX.Y.Z`
+(or `@latest`), the Go module proxy caches the tag's content and the checksum
+database records it permanently, so a tag can't be moved or recreated later.
+The release workflow therefore creates the tag last, after everything else has
+passed:
+
+1. **Bump `version` in `package.nix`** (e.g. `0.2.0`) in a normal PR, and merge
+   it.
+2. **Run the Release workflow on `main`** (Actions → Release → Run workflow).
+   It takes no inputs; the version comes from `package.nix`. In order, it:
+   1. checks it is running on `main`, that the version is `X.Y.Z`, and that
+      `vX.Y.Z` doesn't exist yet;
+   2. runs the full CI workflow on that exact commit;
+   3. builds the binaries with `scripts/release-build.sh` and attests them;
+   4. runs each binary on its own platform (including Intel and Apple Silicon
+      macOS, since those are cross-compiled from Linux);
+   5. uploads everything to a draft release, then publishes it. Publishing
+      creates the tag on the tested commit.
+
+If any step before publishing fails, nothing is public yet: fix the problem on
+`main` and run the workflow again with the same version. A draft left by a
+failed run is replaced. Once a release is published it is final; a fix ships as
+the next patch version.
+
+**Repository settings that back this up:**
+
+- **Immutable releases** (Settings → General → Releases), so a published
+  release's tag and files can't be changed. The workflow already uploads to a
+  draft before publishing, which immutable releases require.
+- **A tag ruleset for `v*`** that only lets GitHub Actions create tags, so
+  nobody can bypass the checks by pushing a tag by hand.
+
+**Reproducing and verifying a release.** Release builds pin their Go version in
+`scripts/release-build.sh` (via `GOTOOLCHAIN`) and don't depend on the
+checkout's state, so anyone can rebuild a release byte for byte:
+
+```sh
+git checkout v0.2.0
+scripts/release-build.sh 0.2.0 "$(git rev-parse HEAD)" dist
+diff dist/SHA256SUMS <(gh release download v0.2.0 -p SHA256SUMS -O -)
+```
+
+To check that a downloaded binary was built by the release workflow:
+
+```sh
+gh attestation verify registries-conf_0.2.0_linux_amd64 --repo devinrsmith/registries-conf
+```
+
+Release binaries are built with upstream Go rather than by Nix. nixpkgs
+patches Go to read `/etc/services`, `/etc/protocols` and time-zone data from
+the Nix store, which Nix-built binaries then reference, and Nix would need a
+native builder per platform. Nix users get the tool from the flake instead.
 
 ## Design notes
 

@@ -22,6 +22,17 @@ against upstream. See [DEVELOPMENT.md](DEVELOPMENT.md#why-short-name-expansion-i
 
 [image]: https://pkg.go.dev/go.podman.io/image/v5/pkg/sysregistriesv2
 
+## Install
+
+- **Prebuilt binaries:** download one from
+  [GitHub Releases](https://github.com/devinrsmith/registries-conf/releases)
+  for Linux (amd64, arm64, fully static) or macOS (Intel, Apple Silicon). Check
+  it against the release's `SHA256SUMS`, or verify where it was built with
+  `gh attestation verify <file> --repo devinrsmith/registries-conf`.
+- **Go:** `go install github.com/devinrsmith/registries-conf/cmd/registries-conf@latest`
+- **Nix:** `nix run github:devinrsmith/registries-conf`, or add the flake's
+  overlay. See [Nix](#nix).
+
 ## Usage
 
 ```console

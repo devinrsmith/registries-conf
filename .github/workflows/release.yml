@@ -1,0 +1,152 @@
+name: Release
+
+# Run by hand (Actions > Release > Run workflow) on main, once package.nix has
+# the new version. The tag vX.Y.Z is created last, by publishing the release,
+# and only after CI has passed on this exact commit and the binaries have been
+# built and run on every platform. Until then nothing is public, so a failed
+# run can be fixed on main and repeated with the same version. A tag can't be
+# taken back: the Go module proxy caches it permanently.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: check version
+    runs-on: ubuntu-26.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Releases are made from main, not $GITHUB_REF."
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read the version from package.nix
+        id: version
+        run: |
+          version=$(sed -n 's/^  version = "\([^"]*\)";$/\1/p' package.nix)
+          if ! [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected one X.Y.Z version in package.nix, found '$version'."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Require that v${{ steps.version.outputs.version }} is not tagged yet
+        env:
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          found=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq "map(select(.ref == \"refs/tags/$TAG\")) | length")
+          if [ "$found" != 0 ]; then
+            echo "$TAG already exists. Bump version in package.nix first."
+            exit 1
+          fi
+
+  ci:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: [prepare, ci]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Any Go >= 1.21 will do: the script pins the exact release via GOTOOLCHAIN.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: scripts/release-build.sh "${{ needs.prepare.outputs.version }}" "$GITHUB_SHA" dist
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/registries-conf_*
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  # Run each binary on its own platform before anything is published. This also
+  # covers what the build can't: darwin binaries are cross-compiled from Linux.
+  smoke:
+    name: smoke (${{ matrix.target }})
+    needs: [prepare, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-26.04, target: linux_amd64 }
+          - { os: ubuntu-26.04-arm, target: linux_arm64 }
+          - { os: macos-26, target: darwin_arm64 }
+          - { os: macos-26-intel, target: darwin_amd64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - name: Run the binary
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BIN: dist/registries-conf_${{ needs.prepare.outputs.version }}_${{ matrix.target }}
+        run: |
+          chmod +x "$BIN" # artifacts don't keep the executable bit
+          "$BIN" version
+          "$BIN" version --json > version.json
+          grep -q "\"version\": \"$VERSION\"" version.json
+          grep -q "\"revision\": \"$GITHUB_SHA\"" version.json
+
+          printf 'unqualified-search-registries = ["docker.io"]\n' > registries.conf
+          got=$("$BIN" resolve --format plain --registries-conf registries.conf \
+            --registries-conf-dir "$RUNNER_TEMP/none" \
+            --short-name-aliases "$RUNNER_TEMP/short-name-aliases.conf" nginx)
+          [ "$got" = docker.io/library/nginx:latest ] || { echo "unexpected: $got"; exit 1; }
+
+  publish:
+    needs: [prepare, smoke]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: v${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist
+      - name: Require that the tag is still free
+        run: |
+          found=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq "map(select(.ref == \"refs/tags/$TAG\")) | length")
+          if [ "$found" != 0 ]; then
+            echo "$TAG was created while this run was in progress."
+            exit 1
+          fi
+      - name: Remove a draft left by an earlier failed run
+        run: |
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "$TAG is already published."
+              exit 1
+            fi
+            gh release delete "$TAG" --yes
+          fi
+      # A draft doesn't create the tag, so users never see a release without its
+      # files; publishing it creates vX.Y.Z on this commit.
+      - name: Create a draft release with the binaries
+        run: gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "$TAG" --generate-notes dist/*
+      - name: Publish the release, creating the tag
+        run: gh release edit "$TAG" --draft=false
