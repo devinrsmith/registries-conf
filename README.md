@@ -99,6 +99,82 @@ When `--short-name-aliases` is not given, short-name resolution reads (and may
 create the directory for) `$XDG_CACHE_HOME/containers/short-name-aliases.conf`.
 That is why `HOME` must be writable inside a Nix sandbox.
 
+On a default NixOS 26.05 system, the `system.checks` example above fails, because
+NixOS writes `registries.conf` in the old v1 format. See below.
+
+### NixOS 26.05 writes registries.conf in v1 format
+
+The `virtualisation.containers` module in NixOS 26.05 always generates
+`/etc/containers/registries.conf` in the v1 format, even with default options:
+
+```toml
+[registries.block]
+registries = []
+
+[registries.insecure]
+registries = []
+
+[registries.search]
+registries = ["docker.io", "quay.io"]
+```
+
+Its only registry options are `virtualisation.containers.registries.search`
+(default `[ "docker.io" "quay.io" ]`), `insecure` and `block`, and none of them
+produce v2. The containers/image version this tool uses rejects v1, so every
+command fails with:
+
+```
+registries.conf must be in v2 format but is in v1
+```
+
+Older containers/image releases converted v1 to v2 when loading, so Podman on
+the same system may still read the file. It will fail the same way once its
+containers/image is updated.
+
+**Workaround on 26.05:** replace the generated file with a v2 one, and move any
+`search`, `insecure` and `block` values into it:
+
+```nix
+environment.etc."containers/registries.conf".source = lib.mkForce (
+  (pkgs.formats.toml { }).generate "registries.conf" {
+    unqualified-search-registries = [ "docker.io" "quay.io" ];   # was `search`
+    registry = [
+      { location = "registry.internal:5000"; insecure = true; }  # was `insecure`
+      { location = "evil.example.com"; blocked = true; }         # was `block`
+    ];
+  }
+);
+```
+
+**NixOS 26.11:** nixpkgs unstable adds a `virtualisation.containers.registries.settings`
+option that takes v2 directly, and deprecates `search`, `insecure` and `block`
+(with a note to remove them in 26.11). This is as of October 2026, and may
+change before the release. After upgrading, drop the `mkForce` override and put
+the same attribute set in `registries.settings`:
+
+```nix
+virtualisation.containers.registries.settings = {
+  unqualified-search-registries = [ "docker.io" "quay.io" ];
+  registry = [ /* as above */ ];
+};
+```
+
+Two things to watch for with the unstable module:
+
+- **Old options still produce v1.** If `search`, `insecure` or `block` is
+  set, the module writes the v1 tables, merged with any `settings` you set
+  yourself. Either way the file is rejected. Remove the old options.
+- **The default `settings` doesn't set `unqualified-search-registries`.** It
+  only lists `docker.io` and `quay.io` as `[[registry]]` entries. The file is
+  valid v2, but short names like `nginx` don't resolve; `resolve` fails with
+  `short-name "nginx" did not resolve to an alias and no
+  containers-registries.conf(5) was found`. (That message is upstream's; it
+  means no unqualified-search registries are defined.) Set
+  `unqualified-search-registries` yourself.
+
+`registries-conf check` and `registries-conf resolve nginx` show which case a
+system is in.
+
 ## Why a binary rather than a Go library
 
 Go programs gain nothing from a wrapper: they can import `sysregistriesv2`
