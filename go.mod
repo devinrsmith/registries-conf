@@ -2,7 +2,7 @@ module github.com/devinrsmith/registries-conf
 
 go 1.26.0
 
-require go.podman.io/image/v5 v5.41.2
+require go.podman.io/image/v5 v5.42.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
@@ -15,8 +15,8 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
-	github.com/sirupsen/logrus v1.9.4 // indirect
-	go.podman.io/storage v1.64.1 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
+	github.com/sirupsen/logrus v1.10.2 // indirect
+	go.podman.io/storage v1.65.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
 )
