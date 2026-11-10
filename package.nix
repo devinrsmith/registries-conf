@@ -9,7 +9,7 @@ buildGoModule (finalAttrs: {
     fileset = lib.fileset.unions [ ./go.mod ./go.sum ./cmd ];
   };
 
-  vendorHash = "sha256-7chMaGkkSYh3JmTB0CualrMXAdG14w9jrTY+OlWWiFs=";
+  vendorHash = "sha256-7jB3jvSDpKciff4yQG24v6G7eL+oH2MiAMtOcuRUsD8=";
 
   subPackages = [ "cmd/registries-conf" ];
 
